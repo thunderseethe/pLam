@@ -20,14 +20,13 @@ languageDef =
                                        , ":run"
                                        , ":print"
                                        , ":d"
-                                       , ":b"
+                                       , ":cbv"
                                        ]
              , Token.reservedOpNames = [ "="
                                        , "." 
                                        , "\\"
                                        , "["
                                        , "]"
-                                       , ","
                                        ]
              }
 
@@ -37,6 +36,7 @@ identifier = Token.identifier lexer
 reserved   = Token.reserved   lexer 
 reservedOp = Token.reservedOp lexer 
 parens     = Token.parens     lexer
+comma      = Token.comma      lexer
 -------------------------------------------------------------------------------------
 
 type Parser = Parsec String ()
@@ -86,13 +86,14 @@ createList (x:xs) = Abstraction (LambdaVar 'f' 0) (Abstraction (LambdaVar 'l' 0)
 parseList :: Parser Expression
 parseList = do
     reservedOp "["
-    exprs <- parseExpression `sepBy` (char ',')
+    exprs <- parseExpression `sepBy` comma
     reservedOp "]"
     return $ createList exprs
 
 parseNumeral :: Parser Expression
 parseNumeral = do
     strNum <- many1 digit
+    spaces
     let intNum = read strNum :: Int
     maybeB <- optionMaybe (char 'b') 
     case maybeB == (Just 'b') of
@@ -131,8 +132,11 @@ parseSingleton =  parseList
               <|> parens parseApplication
 
 parseExpression :: Parser Expression
-parseExpression =  parseApplication
-               <|> parseSingleton
+parseExpression = do
+  spaces
+  expr <- parseApplication <|> parseSingleton
+  spaces
+  return expr
 -------------------------------------------------------------------------------------
 
 -------------------------------------------------------------------------------------
@@ -145,17 +149,26 @@ parseDefine = do
     y <- parseExpression
     return $ Define var y
 
-parseShow :: Parser Command
-parseShow = do
-    ex <- parseExpression
-    return $ Show ex
-
-parseShowDetailed :: Parser Command
-parseShowDetailed = do
+-- Evaluate with options
+parseDetailed :: Parser EvaluateOption
+parseDetailed = do
     reserved ":d"
+    return Detailed
+
+parseCallByValue :: Parser EvaluateOption
+parseCallByValue = do
+    reserved ":cbv"
+    return CallByValue
+
+parseEvaluate :: Parser Command
+parseEvaluate = do
+    det <- option None parseDetailed
     spaces
-    ex <- parseExpression
-    return $ ShowDetailed ex
+    cbv <- option None parseCallByValue
+    spaces
+    exp <- parseExpression
+    return $ Evaluate det cbv exp
+-----------------------------------
 
 parseImport :: Parser Command
 parseImport = do
@@ -163,6 +176,13 @@ parseImport = do
     spaces
     f <- filename
     return $ Import f
+
+parseExport :: Parser Command
+parseExport = do
+    reserved ":export"
+    spaces
+    f <- filename
+    return $ Export f
 
 parseReview :: Parser Command
 parseReview = do
@@ -198,14 +218,15 @@ parsePrint = do
     
 parseLine :: Parser Command
 parseLine =  try parseDefine
-         <|> parseShowDetailed
          <|> parseImport
+         <|> parseExport
          <|> parseReview
          <|> parseRun
          <|> parsePrint
          <|> parseComment
-         <|> parseShow
+         <|> parseEvaluate
          <|> parseEmptyLine
+         
 -------------------------------------------------------------------------------------
 
 -------------------------------------------------------------------------------------

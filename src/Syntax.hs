@@ -113,18 +113,20 @@ prettyPrint = cata alga
       App e1 e2 -> Text.concat [e1, Text.pack " ", e2]
 
 -------------------------------------------------------------------------------------
--------------------------------------------------------------------------------------
-data Command
-  = Define String
-           Expression
-  | Show Expression
-  | ShowDetailed Expression
-  | Import String
-  | Review String
-  | Comment String
-  | Run String
-  | Print String
-  deriving (Eq, Show)
+data EvaluateOption = Detailed
+                    | CallByValue
+                    | None
+                    deriving (Eq, Show)
+
+data Command = Define String Expression
+             | Evaluate EvaluateOption EvaluateOption Expression
+             | Import String
+             | Export String
+             | Review String
+             | Comment String
+             | Run String
+             | Print String
+             deriving (Eq, Show)
 
 -------------------------------------------------------------------------------------
 -------------------------------------------------------------------------------------

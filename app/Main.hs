@@ -7,14 +7,15 @@ import Helper
 
 import Control.Monad.State
 import Debug.Trace
-import System.IO (hFlush, stdout)
+import System.IO (hFlush, stdout, hPutStrLn, hClose, openFile, IOMode(WriteMode))
 import System.Exit
 import System.Console.Haskeline
 import System.Environment
+import System.Directory (doesFileExist)
 import Text.Parsec
 
 
-version = "2.0.0"
+version = "2.2.0"
 heading = "\x1b[1;36m\
 \         _\n\
 \        | |\n\
@@ -38,23 +39,14 @@ execAll (line:ls) env =
                     let exprs = lines content
                     env' <- execAll exprs env
                     execAll ls env'
-                Define v e -> do
-                    let (res, env') = (evalDefine v e) `runState` env
+                Define v e ->
+                    let (res, env') = (evalDefine v e) `runState` env in
                     case res of
                         Left err -> do
                             outputStrLn (show err)
                             execAll ls env'
                         Right f  -> execAll ls env'
-                Show e -> do
-                    let (res, env') = (evalExp e) `runState` env
-                    case res of
-                        Left err -> do
-                            outputStrLn (show err)
-                            return env
-                        Right exp -> do
-                            --putStrLn ("----- original term : " ++ show exp)
-                            showResult env exp 0
-                            execAll ls env'
+                Evaluate det cbv e -> decideEvaluate env det cbv e
                 Print s -> do
                     outputStrLn s
                     execAll ls env
@@ -64,7 +56,7 @@ execute :: String -> Environment -> InputT IO Environment
 execute line env = 
     case readLine line of
             Left (SyntaxError e) -> do
-                outputStrLn $ show e
+                outputStrLn (show e)
                 return env
             Right comm -> case comm of
                 Define v e -> do
@@ -73,32 +65,27 @@ execute line env =
                         Left err -> outputStrLn (show err)
                         Right exp -> outputStr ""
                     return env'
-                Show e -> do
-                    let (res, env') = (evalExp e) `runState` env
-                    case res of
-                        Left err -> outputStrLn $ show err
-                        Right exp -> showResult env exp 0
-                    return env
-                ShowDetailed e -> do
-                    let (res, env') = (evalExp e) `runState` env
-                    case res of
-                        Left err -> outputStrLn $ show err
-                        Right exp -> do
-                            --putStrLn ("----- original term : " ++ show exp)
-                            op <- getInputLine "\x1b[1;33mChoose stepping option\x1b[0m ([default] a: auto all, m: manual step-by-step): "
-                            case op of
-                                Just "a" -> autoReduce env exp 0
-                                Just "m" -> manualReduce env exp 0
-                                otherwise -> autoReduce env exp 0
-                    return env
+                Evaluate det cbv e -> decideEvaluate env det cbv e
                 Import f -> do
                     content <- liftIO $ readFile (importPath ++ f ++ ".plam")
                     let exprs = lines content
-                    execAll exprs env                  
+                    execAll exprs env
+                Export f -> do
+                    fileExists <- liftIO $ doesFileExist (importPath ++ f ++ ".plam")
+                    if not fileExists
+                        then do
+                            outFile <- liftIO $ openFile (importPath ++ f ++ ".plam") WriteMode
+                            liftIO $ mapM_ (saveGlobal outFile) (reverse env)
+                            liftIO $ hClose outFile
+                            outputStrLn("--- successfully exported to import/" ++ f ++ ".plam")
+                        else
+                            outputStrLn("--- export failed : " ++ f ++ " already exists")
+                    return env
                 Review r -> do
                     case r of
-                       "all" -> do
+                       "all" ->
                            outputStrLn " ENVIRONMENT:"
+                           >>
                            mapM_ showGlobal env
                        otherwise -> outputStrLn ("--- definition of " ++ show r ++ ": " ++ reviewVariable env r)
                     return env
@@ -117,7 +104,7 @@ execJustProg [] env = return env
 execJustProg (line:ls) env =
     case readLine line of
             Left (SyntaxError err) -> do
-                putStrLn (show err) 
+                putStrLn (show err)
                 return env
             Right comm -> case comm of   
                 Import f -> do
@@ -125,31 +112,21 @@ execJustProg (line:ls) env =
                     let exprs = lines content
                     env' <- execJustProg exprs env
                     execJustProg ls env'
-                Define v e -> do
-                    let (res, env') = (evalDefine v e) `runState` env
+                Define v e ->
+                    let (res, env') = (evalDefine v e) `runState` env in
                     case res of
                         Left err -> do
                             putStrLn (show err)
                             execJustProg ls env'
                         Right f  -> execJustProg ls env'
-                Show e -> do
-                    let (res, env') = (evalExp e) `runState` env
-                    case res of
-                        Left err -> do
-                            putStrLn (show err)
-                            return env
-                        Right exp -> do
-                            showProgResult env exp 0
-                            execJustProg ls env'
-                ShowDetailed e -> do
-                    let (res, env') = (evalExp e) `runState` env
-                    case res of
-                        Left err -> do
-                            putStrLn (show err)
-                            return env
-                        Right exp -> do
-                            autoProgReduce env exp 0
-                            execJustProg ls env'
+                Evaluate det cbv e -> decideEvaluateProg env det cbv e
+                Review r -> do
+                    case r of
+                       "all" -> do
+                           putStrLn " ENVIRONMENT:"
+                           mapM_ printGlobal env
+                       otherwise -> putStrLn ("--- definition of " ++ show r ++ ": " ++ reviewVariable env r)
+                    execJustProg ls env
                 Print s -> do
                     putStrLn s
                     execJustProg ls env
@@ -169,23 +146,21 @@ repl env = do
     mline <- getInputLine "\x1b[1;36mpLam>\x1b[0m "
     case mline of
         Nothing -> return ()
-        Just ":quit" -> do
-            outputStrLn "\x1b[1;32mGoodbye!\x1b[0m"
-            return ()
-        Just ":q" -> do
-            outputStrLn "\x1b[1;32mGoodbye!\x1b[0m"
-            return ()
-        Just line -> do
-            env' <- execute line env
-            repl env'
+        Just line
+            | line == ":quit" || line == ":q"-> do
+                outputStrLn "\x1b[1;32mGoodbye!\x1b[0m"
+                return ()
+            | otherwise -> do
+                env' <- execute line env
+                repl env'
 
 decideRun :: [String] -> IO()
 decideRun args
     | length args == 0 = do
         putStrLn heading 
-        runInputT defaultSettings (repl [])
+        runInput
     | (length args == 1) && (head args == ":nohead") = do
-        runInputT defaultSettings (repl [])
+        runInput
     | (length args == 1) && (isplam (head args)) = do
         content <- readFile (head args)
         let exprs = lines content
@@ -194,7 +169,9 @@ decideRun args
     | otherwise = do
         putStrLn "\x1b[31mignoring argument(s)...\x1b[0m"
         putStrLn heading 
-        runInputT defaultSettings (repl [])
+        runInput
+    where
+      runInput = runInputT defaultSettings { historyFile = Just ".plam-history" } (repl [])
 
 ------- REPL -----
 
