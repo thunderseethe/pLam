@@ -6,11 +6,12 @@ import Reducer
 import Helper
 
 import Control.Monad.State
-import System.IO (hFlush, stdout)
 import Debug.Trace
+import System.IO (hFlush, stdout)
 import System.Exit
 import System.Console.Haskeline
 import System.Environment
+import Text.Parsec
 
 
 version = "2.0.0"
@@ -194,6 +195,11 @@ decideRun args
         putStrLn "\x1b[31mignoring argument(s)...\x1b[0m"
         putStrLn heading 
         runInputT defaultSettings (repl [])
+
+------- REPL -----
+
+par input = debruijnify $ either undefined id $ parse parseSingleton "parser" input
+
                   
 main :: IO ()
 main = do
