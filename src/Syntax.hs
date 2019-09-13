@@ -1,5 +1,7 @@
 {-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Syntax where
@@ -7,6 +9,7 @@ module Syntax where
 import Control.Monad.State
 import Data.Functor.Classes
 import Data.Functor.Foldable
+import Data.List
 import qualified Data.Text as Text
 import Text.Parsec hiding (State)
 
@@ -18,11 +21,11 @@ data LambdaVar = LambdaVar
 
 showVarHelper :: Int -> String
 showVarHelper 0 = ""
-showVarHelper n = "'" ++ showVarHelper (n - 1)
+showVarHelper n = '\'' : showVarHelper (n - 1)
 
 instance Show LambdaVar where
   show (LambdaVar c 0) = [c]
-  show (LambdaVar c i) = [c] ++ showVarHelper i
+  show (LambdaVar c i) = c : showVarHelper i
 
 -------------------------------------------------------------------------------------
 -------------------------------------------------------------------------------------
@@ -54,7 +57,7 @@ instance Show Expression where
 data DeBruijnF a
   = Var Int
         LambdaVar
-  | Abs a
+  | Abs a LambdaVar
   | App a
         a
   deriving (Ord, Eq, Functor)
@@ -62,8 +65,8 @@ data DeBruijnF a
 var :: Int -> LambdaVar -> DeBruijn
 var i lv = Fix $ Var i lv
 
-abs :: DeBruijn -> DeBruijn
-abs = Fix . Abs
+abs :: DeBruijn -> LambdaVar -> DeBruijn
+abs body lv = Fix $ Abs body lv
 
 app :: DeBruijn -> DeBruijn -> DeBruijn
 app e1 e2 = Fix $ App e1 e2
@@ -71,46 +74,35 @@ app e1 e2 = Fix $ App e1 e2
 type DeBruijn = Fix DeBruijnF
 
 debruijnify :: Expression -> DeBruijn
-debruijnify expr = ana debruijnCoalg ([], 0, expr)
+debruijnify = ana coalga . ([],)
+  where
+    coalga (gamma, expr) = case expr of
+      Variable var ->
+        let val = findDepth var gamma
+        in Var val var
+      Abstraction arg body -> Abs (arg:gamma, body) arg
+      Application e1 e2 -> App (gamma, e1) (gamma, e2)
 
-debruijnCoalg ::
-     ([(LambdaVar, Int)], Int, Expression)
-  -> Base DeBruijn ([(LambdaVar, Int)], Int, Expression)
-debruijnCoalg (gamma, n, expr) =
-  case expr of
-    Variable var ->
-      let depth = findDepth n var gamma
-          val =
-            if depth < 0
-              then depth
-              else (n - depth)
-      in Var val var
-    EnvironmentVar name -> undefined
-    Abstraction var body -> Abs ((var, n) : gamma, n + 1, body)
-    Application e1 e2 -> App (gamma, n, e1) (gamma, n, e2)
-
-findDepth :: Int -> LambdaVar -> [(LambdaVar, Int)] -> Int
-findDepth freeVal var gamma =
-  case gamma of
-    (v, n):tail ->
-      if var == v
-        then n
-        else findDepth (max freeVal n) var tail
-    [] -> -(freeVal + 1)
+findDepth :: LambdaVar -> [LambdaVar] -> Int
+findDepth var = go 0
+  where
+    go n = \case
+      (v:vs) -> if v == var then n else go (n+1) vs
+      [] -> n
 
 instance Show1 DeBruijnF where
   liftShowsPrec _ _ d (Var i _) = showsPrec d i
-  liftShowsPrec sp _ d (Abs body) =
+  liftShowsPrec sp _ d (Abs body _) =
     showParen False $ showsUnaryWith sp "λ" d body
   liftShowsPrec sp _ d (App e1 e2) = (sp d e1) . (showChar ' ') . (sp d e2)
 
 prettyPrint :: DeBruijn -> Text.Text
 prettyPrint = cata alga
   where
-    alga e = case e of
-      Var i _ -> (Text.pack . show) i
-      Abs body -> Text.concat [Text.pack "(λ ", body, Text.pack ")"]
-      App e1 e2 -> Text.concat [e1, Text.pack " ", e2]
+    alga = \case
+      Var i lv -> (Text.pack . show) lv
+      Abs body lv -> Text.concat ["(λ", (Text.pack . show) lv, ". ", body, ")"]
+      App e1 e2 -> Text.concat [e1, " ", e2]
 
 -------------------------------------------------------------------------------------
 data EvaluateOption = Detailed

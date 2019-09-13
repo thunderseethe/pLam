@@ -1,14 +1,15 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Reducer where
 
-import Control.Monad.State
+import Control.Comonad.Cofree
 
 import Data.Functor.Foldable hiding (fold)
 import qualified Data.List as List
 import Data.Set hiding (fold)
 import Data.Tree
-import Prelude hiding (filter, map, null, rem)
+import Prelude hiding (filter, map, null, rem, abs)
 import System.Console.Haskeline
 
 import Syntax
@@ -42,7 +43,7 @@ dbVars = cata alga
     alga =
       \case
         Var i _ -> singleton i
-        Abs body -> body
+        Abs body _ -> body
         App e1 e2 -> union e1 e2
 
 --------------------------------------------------------------------------------
@@ -60,7 +61,7 @@ dbFreeVars = cata alga
           if i < 0
             then singleton i
             else empty
-        Abs body -> body
+        Abs body _ -> body
         App e1 e2 -> union e1 e2
 
 --------------------------------------------------------------------------------
@@ -78,7 +79,7 @@ dbBoundVars = cata alga
           if i > 0
             then singleton i
             else empty
-        Abs body -> body
+        Abs body _ -> body
         App e1 e2 -> union e1 e2
 
 --------------------------------------------------------------------------------
@@ -105,19 +106,24 @@ sub x n (Abstraction y@(LambdaVar name num) p)
     in Abstraction new $ sub x n $ sub y (Variable new) p
 
 subst :: DeBruijn -> DeBruijn -> DeBruijn
-subst sub = go 0
+subst sub expr = cata alga expr (0, sub)
   where
-    go n e = case unfix e of
-      Var i lv -> if i == n then sub else var i lv
-      Abs body -> Syntax.abs (go (n + 1) (shift 1 0 body))
-      App e1 e2 -> app (go n e1) (go n e2)
+    alga :: Base DeBruijn ((Int, DeBruijn) -> DeBruijn) -> ((Int, DeBruijn) -> DeBruijn)
+    alga = \case
+      Var i lv -> \(n, sub) -> if i == n then sub else var i lv
+      Abs body lv -> \(n, sub) -> abs (body (n + 1, shift 1 0 sub)) lv
+      App e1 e2 -> \s -> app (e1 s) (e2 s)
+
 
 shift :: Int -> Int -> DeBruijn -> DeBruijn
-shift d c e = case unfix e of
-  Var i lv -> let n = if i >= c then i + d else i
-    in var n lv
-  Abs body -> Syntax.abs $ shift d (c+1) body
-  App e1 e2 -> app (shift d c e1) (shift d c e2)
+shift d c = ana coalga . (,,) d c
+  where
+    coalga :: (Int, Int, DeBruijn) -> Base DeBruijn (Int, Int, DeBruijn)
+    coalga (d, c, e) = case unfix e of
+      Var i lv ->
+        let n = if i >= c then i + d else i in Var n lv
+      Abs body lv -> Abs (d, c+1, body) lv
+      App e1 e2 -> App (d, c, e1) (d, c, e2)
 
 --------------------------------------------------------------------------------
 -- ALPHA equivalence
@@ -139,11 +145,14 @@ alphaEquiv (Abstraction x f) (Abstraction y g) =
 alphaEquiv _ _ = False
 
 dbAlphaEquiv :: DeBruijn -> DeBruijn -> Bool
-dbAlphaEquiv a b = case (unfix a, unfix b) of
-  (Var i _, Var j _) -> i == j
-  (Abs b1, Abs b2) -> dbAlphaEquiv b1 b2
-  (App e1 e2, App r1 r2) -> dbAlphaEquiv e1 r1 && dbAlphaEquiv e2 r2
-  (_, _) -> False
+dbAlphaEquiv = go
+  where
+    go :: DeBruijn -> DeBruijn -> Bool
+    go a b = case (unfix a, unfix b) of
+      (Var i _, Var j _) -> i == j
+      (Abs b1 _, Abs b2 _) -> go b1 b2
+      (App e1 e2, App r1 r2) -> go e1 r1 && go e2 r2
+      (_, _) -> False
 
 
 --------------------------------------------------------------------------------
@@ -166,9 +175,9 @@ dbBetaRedexes :: DeBruijn -> [DeBruijn]
 dbBetaRedexes = para alga
   where
     alga = \case
-      App (Fix (Abs e1), l1) (e2, l2) -> (app (Syntax.abs e1) e2) : l1 ++ l2
+      App (Fix (Abs e1 lv), l1) (e2, l2) -> (app (Syntax.abs e1 lv) e2) : l1 ++ l2
       App (_, l1) (_, l2) -> l1 ++ l2
-      Abs (_, lst) -> lst
+      Abs (_, lst) _ -> lst
       Var _ _ -> []
 
 
@@ -186,16 +195,29 @@ dbHasBetaRedex = not . List.null . dbBetaRedexes
 ---- (other type) application reduces its applicants (first left one to beta nf)
 ---- reducing abstraction is reducing its body
 ---- variable doesnt reduce
-dbBetaReduction :: Int -> DeBruijn -> (Int, DeBruijn)
-dbBetaReduction n e = case unfix e of
-  Var i lv -> (n, var i lv)
-  Abs body -> 
-    let (n', body') = dbBetaReduction n body
-     in (n', Syntax.abs body')
-  App (Fix (Abs body)) arg -> (n + 1, subst arg body)
-  App e1 e2 -> if dbHasBetaRedex e1 
-                 then let (n', e1') = dbBetaReduction n e1 in (n', app e1' e2) 
-                 else let (n', e2') = dbBetaReduction n e2 in (n', app e1 e2')
+dbBetaReduction :: DeBruijn -> (Int, DeBruijn)
+dbBetaReduction = go 0 
+  where 
+    go n e = case unfix e of
+      Var i lv -> (n, var i lv)
+      Abs body lv ->
+        let (n', body') = go n body
+        in (n', Syntax.abs body' lv)
+      App (Fix (Abs body _)) arg -> (n + 1, shift (-1) 0 $ subst (shift 1 0 arg) body)
+      App e1 e2 -> if dbHasBetaRedex e1
+                    then let (n', e1') = go n e1 in (n', app e1' e2)
+                    else let (n', e2') = go n e2 in (n', app e1 e2')
+
+beta :: DeBruijn -> (Int, DeBruijn)
+beta = histo alga
+  where
+    alga :: Base DeBruijn (Cofree (Base DeBruijn) (Int, DeBruijn)) -> (Int, DeBruijn)
+    alga = \case
+      Var i lv -> (0, var i lv)
+      Abs ((n, body) :< _) lv -> (n, abs body lv)
+      App (_ :< Abs ((n, body) :< _) _) ((m, arg) :< _) -> (n + m + 1, shift (-1) 0 $ subst (shift 1 0 arg) body)
+      App ((n, e1) :< _) ((m, e2) :< _) -> (n + m, app e1 e2)
+ 
 
 betaReduction :: EvaluateOption -> Int -> Expression -> (Expression, Int)
 betaReduction _ n (Variable v) = (Variable v, n)
