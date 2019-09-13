@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 import           Config
 import           Syntax
 import           Parser
@@ -7,6 +8,7 @@ import           Helper
 
 import           Control.Monad.State
 import           Debug.Trace
+import           Data.Bifunctor
 import           System.IO                      ( hFlush
                                                 , stdout
                                                 , hPutStrLn
@@ -59,6 +61,38 @@ execAll (line : ls) env = case readLine line of
             outputStrLn s
             execAll ls env
         _ -> execAll ls env
+
+syntaxError :: Environment -> Error -> InputT IO Environment
+syntaxError env e = do
+    outputStrLn (show e)
+    return env
+
+handleLine :: (() -> InputT IO Environment) -> (Command -> InputT IO Environment) -> InputT IO Environment
+handleLine errCont handle 
+
+execAll' :: [String] -> Environment -> InputT IO Environment
+execAll' [] env = return env
+execAll' (line:ls) env = either (syntaxError env) handle $ readLine line
+    where
+        handle :: Command -> InputT IO Environment
+        handle = \case
+            Import f -> do
+                content <- liftIO $ readFile (importPath ++ f ++ ".plam")
+                let exprs = lines content
+                env' <- execAll exprs env
+                execAll ls env'
+            Define v e ->
+                let (res, env') = evalDefine v e `runState` env
+                in  case res of
+                        Left err -> do
+                            outputStrLn (show err)
+                            execAll ls env'
+                        Right f -> execAll ls env'
+            Evaluate det cbv e -> decideEvaluate env det cbv e
+            Print s            -> do
+                outputStrLn s
+                execAll ls env
+            _ -> execAll ls env
 
 execute :: String -> Environment -> InputT IO Environment
 execute line env = case readLine line of
@@ -116,7 +150,7 @@ execJustProg :: [String] -> Environment -> IO Environment
 execJustProg []          env = return env
 execJustProg (line : ls) env = case readLine line of
     Left (SyntaxError err) -> do
-        putStrLn (show err)
+        print err
         return env
     Right comm -> case comm of
         Import f -> do
@@ -125,10 +159,10 @@ execJustProg (line : ls) env = case readLine line of
             env' <- execJustProg exprs env
             execJustProg ls env'
         Define v e ->
-            let (res, env') = (evalDefine v e) `runState` env
+            let (res, env') = evalDefine v e `runState` env
             in  case res of
                     Left err -> do
-                        putStrLn (show err)
+                        print err
                         execJustProg ls env'
                     Right f -> execJustProg ls env'
         Evaluate det cbv e -> decideEvaluateProg env det cbv e
