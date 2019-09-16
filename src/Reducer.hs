@@ -10,7 +10,7 @@ import qualified Data.List as List
 import Data.Set hiding (fold)
 import Data.Tree
 import Prelude hiding (filter, map, null, rem, abs)
-import System.Console.Haskeline
+import System.Console.Repline
 
 import Syntax
 

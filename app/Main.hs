@@ -1,14 +1,21 @@
 {-# LANGUAGE LambdaCase #-}
 import           Config
-import           Syntax
-import           Parser
 import           Evaluator
-import           Reducer
+import           HaskelineClass
 import           Helper
+import           Parser
+import           Reducer
+import           Syntax
 
+import           Control.Applicative
+import           Control.Monad
 import           Control.Monad.State
+import           Control.Monad.Except           ( runExceptT
+                                                , catchError
+                                                )
 import           Debug.Trace
 import           Data.Bifunctor
+import           Data.Maybe
 import           System.IO                      ( hFlush
                                                 , stdout
                                                 , hPutStrLn
@@ -18,6 +25,11 @@ import           System.IO                      ( hFlush
                                                 )
 import           System.Exit
 import           System.Console.Haskeline
+                                         hiding ( getInputLine
+                                                , getInputChar
+                                                , outputStr
+                                                , outputStrLn
+                                                )
 import           System.Environment
 import           System.Directory               ( doesFileExist )
 import           Text.Parsec
@@ -37,82 +49,77 @@ heading =
 \   \x1b[1;36m=================================\n"
 -------------------------------------------------------------------------------------
 
-execAll :: [String] -> Environment -> InputT IO Environment
-execAll []          env = return env
-execAll (line : ls) env = case readLine line of
-    Left (SyntaxError err) -> do
-        outputStrLn (show err)
-        return env
-    Right comm -> case comm of
+execJustProg :: Eval [String] -> Eval Environment
+execJustProg = (=<<) go
+  where
+    go = \case
+        []          -> get
+        (line : ls) -> readLine line >>= handle ls
+
+    handle :: [String] -> Command -> Eval Environment
+    handle ls = \case
         Import f -> do
-            content <- liftIO $ readFile (importPath ++ f ++ ".plam")
-            let exprs = lines content
-            env' <- execAll exprs env
-            execAll ls env'
-        Define v e ->
-            let (res, env') = (evalDefine v e) `runState` env
-            in  case res of
-                    Left err -> do
-                        outputStrLn (show err)
-                        execAll ls env'
-                    Right f -> execAll ls env'
-        Evaluate det cbv e -> decideEvaluate env det cbv e
-        Print s            -> do
-            outputStrLn s
-            execAll ls env
-        _ -> execAll ls env
-
-syntaxError :: Environment -> Error -> InputT IO Environment
-syntaxError env e = do
-    outputStrLn (show e)
-    return env
-
-handleLine :: (() -> InputT IO Environment) -> (Command -> InputT IO Environment) -> InputT IO Environment
-handleLine errCont handle 
-
-execAll' :: [String] -> Environment -> InputT IO Environment
-execAll' [] env = return env
-execAll' (line:ls) env = either (syntaxError env) handle $ readLine line
-    where
-        handle :: Command -> InputT IO Environment
-        handle = \case
-            Import f -> do
-                content <- liftIO $ readFile (importPath ++ f ++ ".plam")
-                let exprs = lines content
-                env' <- execAll exprs env
-                execAll ls env'
-            Define v e ->
-                let (res, env') = evalDefine v e `runState` env
-                in  case res of
-                        Left err -> do
-                            outputStrLn (show err)
-                            execAll ls env'
-                        Right f -> execAll ls env'
-            Evaluate det cbv e -> decideEvaluate env det cbv e
-            Print s            -> do
-                outputStrLn s
-                execAll ls env
-            _ -> execAll ls env
-
-execute :: String -> Environment -> InputT IO Environment
-execute line env = case readLine line of
-    Left (SyntaxError e) -> do
-        outputStrLn (show e)
-        return env
-    Right comm -> case comm of
+            executeFile f >>= put
+            execJustProg (return ls)
         Define v e -> do
-            let (res, env') = (evalDefine v e) `runState` env
-            case res of
-                Left  err -> outputStrLn (show err)
-                Right exp -> outputStr ""
-            return env'
-        Evaluate det cbv e -> decideEvaluate env det cbv e
-        Import f           -> do
-            content <- liftIO $ readFile (importPath ++ f ++ ".plam")
-            let exprs = lines content
-            execAll exprs env
-        Export f -> do
+            evalDefine v e
+            execJustProg (return ls)
+        Evaluate det cbv e -> decideEvaluateProg det cbv e
+        Review r           -> do
+            env <- get
+            case r of
+                "all" -> do
+                    liftIO $ putStrLn " ENVIRONMENT:"
+                    mapM_ printGlobal env
+                _ ->
+                    liftIO
+                        $ putStrLn
+                              (  "--- definition of "
+                              ++ show r
+                              ++ ": "
+                              ++ fromMaybe "none" (reviewVariable env r)
+                              )
+            go ls
+        Print s -> do
+            liftIO $ putStrLn s
+            go ls
+        _ -> go ls
+
+execAll :: Eval [String] -> Eval Environment
+execAll m = m >>= go
+  where
+    go :: [String] -> Eval Environment
+    go = \case
+        []          -> get
+        (line : ls) -> readLine line >>= handle ls
+
+    handle ls = \case
+        Import f   -> executeFile f >> execAll (return ls)
+        Define v e -> do
+            res <- evalDefine v e
+            go ls
+        Evaluate det cbv rawE -> decideEvaluate det cbv rawE
+        Print s               -> do
+            outputStrLn s
+            go ls
+        _ -> go ls
+
+executeFile :: String -> Eval Environment
+executeFile f =
+    let contents = liftIO $ readFile (importPath ++ f ++ ".plam")
+    in  execAll $ lines <$> contents
+
+execute :: Eval String -> Eval Environment
+execute m = handle =<< (readLine =<< m)
+  where
+    handle :: Command -> Eval Environment
+    handle = \case
+        Define v e         -> evalDefine v e >>= const get
+        Evaluate det cbv e -> decideEvaluate det cbv e
+        Import f           -> executeFile f
+        Export f           -> do
             fileExists <- liftIO $ doesFileExist (importPath ++ f ++ ".plam")
+            env        <- get
             if not fileExists
                 then do
                     outFile <- liftIO
@@ -125,6 +132,7 @@ execute line env = case readLine line of
                     ("--- export failed : " ++ f ++ " already exists")
             return env
         Review r -> do
+            env <- get
             case r of
                 "all" -> outputStrLn " ENVIRONMENT:" >> mapM_ showGlobal env
                 _ ->
@@ -132,57 +140,16 @@ execute line env = case readLine line of
                         (  "--- definition of "
                         ++ show r
                         ++ ": "
-                        ++ reviewVariable env r
+                        ++ fromMaybe "none" (reviewVariable env r)
                         )
             return env
-        Run f -> do
-            content <- liftIO $ readFile (f ++ ".plam")
-            let exprs = lines content
-            execAll exprs env
+        Run   f -> executeFile f
         Print s -> do
             outputStrLn s
             outputStrLn
                 "(NOTE: it makes more sense to use a comment line (starts with double '-' than :print command when you are in interactive mode)"
-            return env
-        Comment c -> return env
-
-execJustProg :: [String] -> Environment -> IO Environment
-execJustProg []          env = return env
-execJustProg (line : ls) env = case readLine line of
-    Left (SyntaxError err) -> do
-        print err
-        return env
-    Right comm -> case comm of
-        Import f -> do
-            content <- liftIO $ readFile (importPath ++ f ++ ".plam")
-            let exprs = lines content
-            env' <- execJustProg exprs env
-            execJustProg ls env'
-        Define v e ->
-            let (res, env') = evalDefine v e `runState` env
-            in  case res of
-                    Left err -> do
-                        print err
-                        execJustProg ls env'
-                    Right f -> execJustProg ls env'
-        Evaluate det cbv e -> decideEvaluateProg env det cbv e
-        Review r           -> do
-            case r of
-                "all" -> do
-                    putStrLn " ENVIRONMENT:"
-                    mapM_ printGlobal env
-                _ ->
-                    putStrLn
-                        (  "--- definition of "
-                        ++ show r
-                        ++ ": "
-                        ++ reviewVariable env r
-                        )
-            execJustProg ls env
-        Print s -> do
-            putStrLn s
-            execJustProg ls env
-        _ -> execJustProg ls env
+            get
+        Comment c -> get
 
 -------------------------------------------------------------------------------------
 isplam :: String -> Bool
@@ -193,42 +160,46 @@ isplam (c : cs) | (length cs == 5) && (cs == ".plam") = True
 -------------------------------------------------------------------------------------
                    -- MAIN with Read-Evaluate-Print Loop --
 -------------------------------------------------------------------------------------
-repl :: Environment -> InputT IO ()
-repl env = do
+repl :: Eval ()
+repl = do
     mline <- getInputLine "\x1b[1;36mpLam>\x1b[0m "
     maybe (return ()) handleLine mline
   where
-    handleLine :: String -> InputT IO ()
+    handleLine :: String -> Eval ()
     handleLine line = if line == ":quit" || line == ":q"
         then outputStrLn "\x1b[1;32mGoodbye!\x1b[0m"
         else do
-            env' <- execute line env
-            repl env'
+            void (execute $ return line) `catchError` (liftIO . print)
+            repl
 
-decideRun :: [String] -> IO ()
-decideRun args
-    | length args == 0 = do
-        putStrLn heading
-        runInput
-    | (length args == 1) && (head args == ":nohead") = runInput
-    | (length args == 1) && (isplam (head args)) = do
-        content <- readFile (head args)
+decideRun :: [String] -> IO (Either Error (), Environment)
+decideRun [] = do
+    putStrLn heading
+    runEvaluator repl
+decideRun [arg]
+    | arg == ":nohead" = runEvaluator repl
+    | isplam arg = do
+        content <- readFile arg
         let exprs = lines content
-        execJustProg exprs []
+        output <- runEvaluator $ execJustProg (return exprs)
         putStrLn "\x1b[1;32mDone.\x1b[0m"
-    | otherwise = do
-        putStrLn "\x1b[31mignoring argument(s)...\x1b[0m"
-        putStrLn heading
-        runInput
-  where
-    runInput = runInputT
-        defaultSettings { historyFile = Just ".plam-history" }
-        (repl [])
+        return $ first (second $ const ()) output
+decideRun _ = do
+    putStrLn "\x1b[31mignoring argument(s)...\x1b[0m"
+    putStrLn heading
+    runEvaluator repl
+
+runEvaluator :: Eval a -> IO (Either Error a, Environment)
+runEvaluator = runEvalToIO [] settings
+
+settings :: (MonadIO m) => Settings m
+settings = defaultSettings { historyFile = Just ".plam-history" }
 
 main :: IO ()
 main = do
-    args <- getArgs
-    decideRun args
+    args     <- getArgs
+    (err, _) <- decideRun args
+    either print (\_ -> return ()) err
 
 ------- REPL Debug Functions -----
 par input =

@@ -6,7 +6,8 @@
 
 module Syntax where
 
-import Control.Monad.State
+import Control.Monad.Trans.State.Strict
+import Control.Monad.Except
 import Data.Functor.Classes
 import Data.Functor.Foldable
 import Data.List
@@ -124,7 +125,7 @@ data Command = Define String Expression
 -------------------------------------------------------------------------------------
 type Environment = [(String, Expression)]
 
-type Program = State Environment
+type ProgramT m = StateT Environment m
 
 data Error
   = SyntaxError ParseError
@@ -140,5 +141,6 @@ instance Show Error where
     uv ++ " = <lambda expression>\" to add this variables to environment"
   show (FatalError fe) = show fe
 
-type Failable = Either Error
+--type Failable = Either Error
+type FailableT = ExceptT Error
 -------------------------------------------------------------------------------------

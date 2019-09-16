@@ -1,6 +1,8 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Parser where
 
 import           Control.Monad.State
+import           Control.Monad.Except
 import           Text.Parsec                       hiding ( State )
 import           Debug.Trace
 import           Data.Bifunctor
@@ -246,5 +248,7 @@ parseLine =
 -------------------------------------------------------------------------------------
 
 -------------------------------------------------------------------------------------
-readLine :: String -> Failable Command
-readLine = first SyntaxError . parse parseLine "parser"
+readLine :: (MonadError Error m) => String -> m Command
+readLine input = 
+    let parseOutput = first SyntaxError $ parse parseLine "parser" input
+    in either throwError return parseOutput

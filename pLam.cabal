@@ -1,44 +1,54 @@
-name:                pLam
-version:             2.2.0
--- synopsis:
--- description:
-homepage:            https://github.com/sandrolovnicki/pLam#readme
-license:             BSD3
-license-file:        LICENSE
-author:              Sandro Lovnički
-maintainer:          lovnicki.sandro@gmail.com
-copyright:           2019 Sandro Lovnički
-category:            Web
-build-type:          Simple
-extra-source-files:  README.md
-cabal-version:       >=1.10
+cabal-version: >=1.10
+name: pLam
+version: 2.2.0
+license: BSD3
+license-file: LICENSE
+copyright: 2019 Sandro Lovnički
+maintainer: lovnicki.sandro@gmail.com
+author: Sandro Lovnički
+homepage: https://github.com/sandrolovnicki/pLam#readme
+category: Web
+build-type: Simple
+extra-source-files:
+    README.md
+source-repository head
+    type: git
+    location: https://github.com/sandrolovnicki/pLam
+
 
 library
-  hs-source-dirs:      src
-  exposed-modules:     Parser Syntax Evaluator Reducer Helper Config
-  build-depends:       base >= 4.7 && < 5
-                     , containers
-                     , free
-                     , haskeline
-                     , mtl
-                     , parsec
-                     , recursion-schemes
-                     , text
-  default-language:    Haskell2010
+    exposed-modules:
+        Parser
+        Syntax
+        Evaluator
+        Reducer
+        HaskelineClass
+        Helper
+        Config
+    hs-source-dirs: src
+    default-language: Haskell2010
+    build-depends:
+        base >=4.7 && <5,
+        containers -any,
+        free -any,
+        haskeline -any,
+        mtl -any,
+        parsec -any,
+        recursion-schemes -any,
+        repline -any,
+        text -any,
+        transformers -any
 
 executable plam
-  hs-source-dirs:      app
-  main-is:             Main.hs
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
-  build-depends:       base
-                     , containers
-                     , directory
-                     , haskeline
-                     , mtl
-                     , parsec
-                     , pLam
-  default-language:    Haskell2010
-
-source-repository head
-  type:     git
-  location: https://github.com/sandrolovnicki/pLam
+    main-is: Main.hs
+    hs-source-dirs: app
+    default-language: Haskell2010
+    ghc-options: -threaded -rtsopts -with-rtsopts=-N
+    build-depends:
+        base -any,
+        containers -any,
+        directory -any,
+        haskeline -any,
+        mtl -any,
+        parsec -any,
+        pLam -any
