@@ -12,6 +12,7 @@ import           Control.Monad.State
 import           Control.Monad.Except
 import           Data.Bifunctor
 import           Data.Functor.Identity
+import qualified Data.Map as Map
 import           Data.Maybe
 import           System.IO                      ( hClose
                                                 , openFile
@@ -95,7 +96,7 @@ exportFile f = do
         else throwError
             (FatalError $ "--- export failed : " ++ f ++ " already exists")
     env <- get
-    mapM_ (saveGlobal outFile) (reverse env)
+    mapM_ (saveGlobal outFile) (reverse . Map.toList $ env)
     liftIO $ hClose outFile
     outputStrLn ("--- successfully exported to import/" ++ f ++ ".plam")
 
@@ -103,7 +104,7 @@ reviewSymbol :: String -> Eval ()
 reviewSymbol r = do
     env <- get :: Eval Environment
     case r of
-        "all" -> outputStrLn " ENVIRONMENT:" >> mapM_ showGlobal env
+        "all" -> outputStrLn " ENVIRONMENT:" >> mapM_ showGlobal (Map.toList env)
         _     -> outputStrLn
             ("--- definition of " ++ show r ++ ": " ++ fromMaybe
                 "none"
@@ -147,7 +148,7 @@ decideRun args = do
     runEvaluator repl
 
 runEvaluator :: Eval a -> IO (Either Error a, Environment)
-runEvaluator = runEvalToIO [] settings
+runEvaluator = runEvalToIO Map.empty settings
 
 settings :: (MonadIO m) => Settings m
 settings = defaultSettings { historyFile = Just ".plam-history" }
@@ -164,4 +165,4 @@ type PureEval a = StateT Environment (ExceptT Error Identity) a
 _par :: String -> DeBruijn
 _par input = let
     debruijn = (evalExp $ either undefined id $ parse parseExpression "parser" input) :: PureEval DeBruijn
-    in either undefined id $ runIdentity . runExceptT $ evalStateT debruijn []
+    in either undefined id $ runIdentity . runExceptT $ evalStateT debruijn Map.empty

@@ -5,6 +5,7 @@ module Evaluator where
 import           Control.Monad.Except
 import           Control.Monad.State.Strict
 import           Data.Functor.Foldable
+import qualified Data.Map as Map
 import           System.Console.Haskeline
 
 import           HaskelineClass
@@ -29,7 +30,7 @@ evalDefine
     -> m DeBruijn
 evalDefine x y = do
     f <- evalExp y
-    modify ((x, f) :)
+    modify (Map.insert x f)
     return f
 
 toExpression :: DeBruijn -> Expression
@@ -55,8 +56,8 @@ evalExp = earlyReturnM coalga . ([], )
                     env <- get
                     case findDepth n gamma of
                         Right val -> right $ Var val n
-                        Left nm -> case lookup (name nm) env of
-                            Nothing   -> throwError (UndeclaredVariable $ name nm)
+                        Left (LambdaVar name) -> case Map.lookup name env of
+                            Nothing   -> throwError (UndeclaredVariable name)
                             Just term -> left term
 
                 Abstraction arg body -> right $ Abs (arg : gamma, body) arg

@@ -10,12 +10,12 @@ import Control.Monad.Trans.State.Strict
 import Control.Monad.Except
 import Data.Functor.Classes
 import Data.Functor.Foldable
+import qualified Data.Map as Map
 import Text.Parsec hiding (State)
 
 -------------------------------------------------------------------------------------
-newtype LambdaVar = LambdaVar
-  { name :: String
-  } deriving (Ord, Eq)
+newtype LambdaVar = LambdaVar String
+  deriving (Ord, Eq)
 
 instance Show LambdaVar where
   show (LambdaVar c) = c
@@ -127,7 +127,7 @@ data Command = Define String Expression
 
 -------------------------------------------------------------------------------------
 -------------------------------------------------------------------------------------
-type Environment = [(String, DeBruijn)]
+type Environment = Map.Map String DeBruijn
 
 type ProgramT m = StateT Environment m
 

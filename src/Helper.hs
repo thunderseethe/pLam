@@ -12,6 +12,10 @@ import           Control.Applicative
 import           Control.Comonad.Cofree
 import           Control.Monad.State
 import           Control.Monad.Except
+import           Data.Functor.Foldable
+import qualified Data.Map as Map
+import           Data.Map ((!?))
+import           Data.Maybe
 import           System.IO                      ( Handle
                                                 , hPutStrLn
                                                 )
@@ -21,8 +25,6 @@ import           System.Console.Haskeline
                                                 , getInputLine
                                                 , getInputChar
                                                 )
-import           Data.Functor.Foldable
-import           Data.Maybe
 
 
 -------------------------------------------------------------------------------------
@@ -43,9 +45,10 @@ saveGlobal h (n, e) =
     liftIO $ hPutStrLn h (n ++ " = " ++ removeLambda (printUncurried e))
 
 convertToName :: Environment -> DeBruijn -> Maybe String
-convertToName [] term = show <$> findNumeral term
-convertToName ((v, e) : rest) ex | alphaEquiv e ex = Just v
-                                 | otherwise       = convertToName rest ex
+convertToName env term = Map.foldrWithKey findAlphaEquiv (show <$> findNumeral term) env
+  where
+    findAlphaEquiv key val acc = if alphaEquiv val term then Just key else acc
+
 
 convertToNames' :: Bool -> Environment -> DeBruijn -> String
 convertToNames' colored env = go False False (LambdaVar ".")
@@ -110,15 +113,10 @@ convertToNamesResult = convertToNames' True
 
 -----------------------------------------------------------------------------------------------------------
 isDefined :: Environment -> String -> Bool
-isDefined [] _ = False
-isDefined ((v, _) : rest) s | v == s    = True
-                            | otherwise = isDefined rest s
+isDefined = flip Map.member
 
 reviewVariable :: Environment -> String -> Maybe String
-reviewVariable [] _ = Nothing
-reviewVariable ((v, e) : rest) variable
-    | v == variable = Just $ show e
-    | otherwise     = reviewVariable rest variable
+reviewVariable env key = show <$> (env !? key)
 -------------------------------------------------------------------------------------
 
 -------------------------------------------------------------------------------------
@@ -143,13 +141,6 @@ findChurch term = case term of
         App (Fix (Var f _), _) (_, n) ->
             if f == 1 then (+ 1) <$> n else Nothing
         _ -> Nothing
-
---findChurch' :: DeBruijn -> Maybe String
---findChurch' term = go 0
---  where
---    go num | term == createChurch num = Just $ show num
---           | num == 199               = Nothing
---           | otherwise                = go (num + 1)
 
 findBinary :: DeBruijn -> Maybe LambdaVar
 findBinary term = go 0
@@ -216,14 +207,12 @@ printUncurried = histo alga
     combineAbsArgs output body = case body of
         Abs (output' :< body') arg ->
             " " ++ show arg ++ combineAbsArgs output' body'
-        _ -> "." ++ output
+        _ -> ". " ++ output
 
     paranRightAssocApps output term = case term of
         App (e1 :< _) (e2 :< term') ->
             "(" ++ e1 ++ " " ++ paranRightAssocApps e2 term' ++ ")"
         _ -> output
-
-
 
 manualReduce
     :: (MonadIO m, MonadException m, MonadHaskeline m, MonadState Environment m)
