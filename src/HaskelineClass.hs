@@ -4,11 +4,9 @@ module HaskelineClass where
 import Control.Monad.Trans.Except
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
---import Control.Monad.Trans.State.Strict
 import Control.Monad.State.Strict
 
 import qualified System.Console.Haskeline as H
-import System.Console.Haskeline.Completion
 import System.Console.Haskeline.MonadException
 
 newtype HaskelineT m a = HaskelineT { unHaskeline :: H.InputT m a }

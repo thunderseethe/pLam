@@ -1,19 +1,22 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, LambdaCase #-}
 module Parser where
 
-import           Control.Monad.State
+import           Prelude                 hiding ( abs )
+
 import           Control.Monad.Except
-import           Text.Parsec                       hiding ( State )
-import           Debug.Trace
+import           Text.Parsec             hiding ( State )
 import           Data.Bifunctor
-import           Data.Char
+import           Data.Functor.Foldable
+import           Data.Functor.Identity
 
 import qualified Text.Parsec.Token             as Token
 import           Text.Parsec.Language
 
+import           Evaluator
 import           Syntax
 
 -------------------------------------------------------------------------------------
+languageDef :: GenLanguageDef String u Identity
 languageDef = emptyDef
     { Token.commentLine     = "--"
     , Token.identStart      = letter
@@ -28,12 +31,22 @@ languageDef = emptyDef
     , Token.reservedOpNames = ["=", ".", "\\", "[", "]"]
     }
 
+lexer :: Token.GenTokenParser String u Identity
 lexer = Token.makeTokenParser languageDef
 
+identifier :: ParsecT String u Identity String
 identifier = Token.identifier lexer
+
+reserved :: String -> ParsecT String u Identity ()
 reserved = Token.reserved lexer
+
+reservedOp :: String -> ParsecT String u Identity ()
 reservedOp = Token.reservedOp lexer
+
+parens :: ParsecT String u Identity a -> ParsecT String u Identity a
 parens = Token.parens lexer
+
+comma :: ParsecT String u Identity String
 comma = Token.comma lexer
 -------------------------------------------------------------------------------------
 
@@ -49,63 +62,85 @@ comment = many $ symbol <|> letter <|> digit
 filename :: Parser String
 filename = many1 $ letter <|> symbol <|> digit
 
-createChurch :: Int -> Expression -> Expression
-createChurch 0 exp =
-    Abstraction (LambdaVar 'f' 0) (Abstraction (LambdaVar 'x' 0) exp)
-createChurch n exp =
-    createChurch (n - 1) (Application (Variable (LambdaVar 'f' 0)) exp)
+createChurch :: Int -> DeBruijn
+createChurch n = abs (abs (apo coalga n) (LambdaVar "x")) (LambdaVar "f")
+  where
+    -- successor
+    f = Fix $ Var 1 (LambdaVar "f")
+    -- zero
+    x = Var 0 (LambdaVar "x")
+
+    coalga :: Int -> Base DeBruijn (Either DeBruijn Int)
+    coalga = \case
+        0 -> x
+        i -> App (Left f) (Right (i - 1))
 
 -- HELP EXPRS --
-true = Abstraction
-    (LambdaVar 'x' 0)
-    (Abstraction (LambdaVar 'y' 0) (Variable (LambdaVar 'x' 0)))
-false = Abstraction
-    (LambdaVar 'x' 0)
-    (Abstraction (LambdaVar 'y' 0) (Variable (LambdaVar 'y' 0)))
-pair = Abstraction
-    (LambdaVar 'x' 0)
-    (Abstraction
-        (LambdaVar 'y' 0)
-        (Abstraction
-            (LambdaVar 'p' 0)
-            (Application
-                (Application (Variable (LambdaVar 'p' 0))
-                             (Variable (LambdaVar 'x' 0))
-                )
-                (Variable (LambdaVar 'y' 0))
-            )
-        )
-    )
-end = Abstraction (LambdaVar 'e' 0) true
-whichBit :: Int -> Expression
-whichBit b | b == 0 = false
-           | b == 1 = true
+true :: DeBruijn
+true =
+    let x = LambdaVar "x"
+        y = LambdaVar "y"
+    in  abs (abs (var 1 x) y) x
+
+false :: DeBruijn
+false =
+    let x = LambdaVar "x"
+        y = LambdaVar "y"
+    in  abs (abs (var 0 y) y) x
+
+pair :: DeBruijn
+pair =
+    let x = LambdaVar "x"
+        y = LambdaVar "y"
+        p = LambdaVar "p"
+    in  abs (abs (abs (app (app (var 0 p) (var 2 x)) (var 1 y)) p) y) x
+
+end :: DeBruijn
+end = abs true (LambdaVar "e")
+
+whichBit :: Int -> DeBruijn
+whichBit b = if b == 0 then false else true
 
 ----------------
-createBinary' :: Int -> Expression
-createBinary' 0 = end
-createBinary' n = Application (Application pair (whichBit (mod n 2)))
-                              (createBinary' (quot n 2))
-----------------
-createBinary :: Int -> Expression
-createBinary 0 = Application (Application pair false) end
-createBinary n = createBinary' n
+
+createBinary :: Int -> DeBruijn
+createBinary 0 = app (app pair false) end
+createBinary n = apo coalga n
+  where
+    coalga :: Int -> Base DeBruijn (Either DeBruijn Int)
+    coalga = \case
+        0 -> Left <$> unfix end
+        i -> App (Left $ app pair (whichBit (mod i 2))) (Right $ quot i 2)
+
 
 -- LIST --
-empty = Abstraction
-    (LambdaVar 'f' 0)
-    (Abstraction (LambdaVar 'l' 0) (Variable (LambdaVar 'f' 0)))
+empty :: DeBruijn
+empty =
+    let f = LambdaVar "f"
+        l = LambdaVar "l"
+    in  abs (abs (var 1 f) l) f
+
+emptyExpr :: Expression
+emptyExpr = toExpression empty
 
 createList :: [Expression] -> Expression
-createList []       = empty
-createList (x : xs) = Abstraction
-    (LambdaVar 'f' 0)
-    (Abstraction
-        (LambdaVar 'l' 0)
-        (Application (Application (Variable (LambdaVar 'l' 0)) x)
-                     (createList xs)
-        )
+createList []       = emptyExpr
+createList (x : xs) = abstraction
+    (LambdaVar "f")
+    (abstraction
+        (LambdaVar "l")
+        (application (application (varOrEnv (LambdaVar "l")) x) (createList xs))
     )
+
+createList' :: [DeBruijn] -> DeBruijn
+createList' = cata alga
+  where
+    alga = \case
+        Nil -> empty
+        Cons x xs ->
+            let f = LambdaVar "f"
+                l = LambdaVar "l"
+            in  abs (abs (app (app (var 0 l) x) xs) l) f
 -------------------------------------------------------------------------------------
 
 -------------------------------------------------------------------------------------
@@ -122,31 +157,28 @@ parseNumeral = do
     spaces
     let intNum = read strNum :: Int
     maybeB <- optionMaybe (char 'b')
-    return (if maybeB == Just 'b'
-        then createBinary intNum
-        else createChurch intNum (Variable (LambdaVar 'x' 0)))
+    return $ toExpression
+        (if maybeB == Just 'b' then createBinary intNum else createChurch intNum
+        )
 
 parseVariable :: Parser Expression
-parseVariable = do
-    x <- identifier
-    spaces
-    return (if length x == 1 && isLower (head x)
-        then Variable (LambdaVar (head x) 0)
-        else EnvironmentVar x)
+parseVariable = varOrEnv . LambdaVar <$> identifier <* spaces
 
 parseAbstraction :: Parser Expression
-parseAbstraction = do
-    reservedOp "\\"
-    xs <- endBy1 letter spaces
-    reservedOp "."
-    spaces
-    curry xs <$> parseExpression
-    where curry xs body = foldr (\x -> Abstraction (LambdaVar x 0)) body xs
+parseAbstraction =
+    curryLambda
+        <$> (  reservedOp "\\"
+            *> endBy1 identifier spaces
+            <* reservedOp "."
+            <* spaces
+            )
+        <*> parseExpression
+    where curryLambda xs body = foldr (\x -> abstraction (LambdaVar x)) body xs
 
 parseApplication :: Parser Expression
 parseApplication = do
     es <- sepBy1 parseSingleton spaces
-    return $ foldl1 Application es
+    return $ foldl1 application es
 
 parseSingleton :: Parser Expression
 parseSingleton =
@@ -166,12 +198,10 @@ parseExpression = do
 
 -------------------------------------------------------------------------------------
 parseDefine :: Parser Command
-parseDefine = do
-    var <- identifier
-    spaces
-    reservedOp "="
-    spaces
-    Define var <$> parseExpression
+parseDefine =
+    Define
+        <$> (identifier <* spaces <* reservedOp "=" <* spaces)
+        <*> parseExpression
 
 -- Evaluate with options
 parseDetailed :: Parser EvaluateOption
@@ -193,17 +223,15 @@ parseEvaluate = do
     Evaluate det cbv <$> parseExpression
 -----------------------------------
 
+parseFileCommand :: String -> (String -> Command) -> Parser Command
+parseFileCommand commandName cmd =
+    cmd <$> (reserved (':' : commandName) *> spaces *> filename)
+
 parseImport :: Parser Command
-parseImport = do
-    reserved ":import"
-    spaces
-    Import <$> filename
+parseImport = parseFileCommand "import" Import
 
 parseExport :: Parser Command
-parseExport = do
-    reserved ":export"
-    spaces
-    Export <$> filename
+parseExport = parseFileCommand "export" Export 
 
 parseReview :: Parser Command
 parseReview = do
@@ -212,14 +240,10 @@ parseReview = do
     Review <$> identifier
 
 parseComment :: Parser Command
-parseComment = do
-    comm <- string "--"
-    Comment <$> comment
+parseComment = Comment <$> (string "--" *> comment)
 
 parseEmptyLine :: Parser Command
-parseEmptyLine = do
-    emp <- string ""
-    return $ Comment " "
+parseEmptyLine = Comment <$> (string "" *> comment)
 
 parseRun :: Parser Command
 parseRun = do
@@ -249,6 +273,6 @@ parseLine =
 
 -------------------------------------------------------------------------------------
 readLine :: (MonadError Error m) => String -> m Command
-readLine input = 
+readLine input =
     let parseOutput = first SyntaxError $ parse parseLine "parser" input
-    in either throwError return parseOutput
+    in  either throwError return parseOutput
