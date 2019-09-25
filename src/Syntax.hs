@@ -11,7 +11,8 @@ import Control.Monad.Except
 import Data.Functor.Classes
 import Data.Functor.Foldable
 import qualified Data.Map as Map
-import Text.Parsec hiding (State)
+import Data.Text
+import Text.Megaparsec
 
 -------------------------------------------------------------------------------------
 newtype LambdaVar = LambdaVar String
@@ -115,14 +116,14 @@ data EvaluateOption = Detailed
                     | None
                     deriving (Eq, Show)
 
-data Command = Define String Expression
+data Command = Define Text Expression
              | Evaluate EvaluateOption EvaluateOption Expression
-             | Import String
-             | Export String
-             | Review String
-             | Comment String
-             | Run String
-             | Print String
+             | Import Text
+             | Export Text
+             | Review Text
+             | Comment Text
+             | Run Text
+             | Print Text
              deriving (Eq, Show)
 
 -------------------------------------------------------------------------------------
@@ -132,7 +133,7 @@ type Environment = Map.Map String DeBruijn
 type ProgramT m = StateT Environment m
 
 data Error
-  = SyntaxError ParseError
+  = SyntaxError (ParseErrorBundle Text ())
   | UndeclaredVariable String
   | FatalError String
 
