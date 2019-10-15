@@ -6,20 +6,19 @@
 
 module Syntax where
 
+import Control.Comonad.Cofree
 import Control.Monad.Trans.State.Strict
 import Control.Monad.Except
 import Data.Functor.Classes
 import Data.Functor.Foldable
 import qualified Data.Map as Map
 import Data.Text
+import Data.Void
 import Text.Megaparsec
 
 -------------------------------------------------------------------------------------
-newtype LambdaVar = LambdaVar String
-  deriving (Ord, Eq)
-
-instance Show LambdaVar where
-  show (LambdaVar c) = c
+newtype LambdaVar = LambdaVar Text
+  deriving (Ord, Eq, Show)
 
 -------------------------------------------------------------------------------------
 -------------------------------------------------------------------------------------
@@ -60,54 +59,61 @@ instance Show1 ExpressionF where
 -- De Bruijn Indexed Term
 data DeBruijnF a
   = Var Int
-        LambdaVar
-  | Abs a LambdaVar
+  | Abs a
   | App a
         a
   deriving (Ord, Eq, Functor)
 
+-- Deprecated
 type DeBruijn = Fix DeBruijnF
 
-var :: Int -> LambdaVar -> DeBruijn
-var i lv = Fix $ Var i lv
+-- Lambda Term where each Node is annotated with some data.
+type AnnTerm = Cofree DeBruijnF
 
-abs :: DeBruijn -> LambdaVar -> DeBruijn
-abs body lv = Fix $ Abs body lv
+var :: Int -> LambdaVar -> Term
+var i lv = lv :< Var i
 
-app :: DeBruijn -> DeBruijn -> DeBruijn
-app e1 e2 = Fix $ App e1 e2
+abs :: Term -> LambdaVar -> Term
+abs body lv = lv :< Abs body
+
+app :: Term -> Term -> Term
+app e1 e2 = appLambdaVar :< App e1 e2
+
+-- An application has no lambda var associated with it
+appLambdaVar :: LambdaVar
+appLambdaVar = LambdaVar ""
 
 instance Eq1 DeBruijnF where
   liftEq :: (a -> b -> Bool) -> DeBruijnF a -> DeBruijnF b -> Bool
   liftEq eq fa fb = case (fa, fb) of
-    (Var i1 _, Var i2 _) -> i1 == i2
-    (Abs body1 _, Abs body2 _) -> eq body1 body2
+    (Var i1, Var i2) -> i1 == i2
+    (Abs body1, Abs body2) -> eq body1 body2
     (App a1 b1, App a2 b2) -> eq a1 a2 && eq b1 b2
     (_, _) -> False
 
 instance Show1 DeBruijnF where
-  liftShowsPrec _ _ d (Var i _) = showsPrec d i
-  liftShowsPrec sp _ d (Abs body _) =
+  liftShowsPrec _ _ d (Var i) = showsPrec d i
+  liftShowsPrec sp _ d (Abs body) =
     showParen False $ showsUnaryWith sp "λ" d body
   liftShowsPrec sp _ d (App e1 e2) = sp d e1 . showChar ' ' . sp d e2
 
 instance Foldable DeBruijnF where
   foldMap :: (Monoid m) => (a -> m) -> DeBruijnF a -> m
   foldMap f = \case
-    Var _ _ -> mempty
-    Abs body _ -> f body
+    Var _ -> mempty
+    Abs body -> f body
     App e1 e2 -> f e1 <> f e2
 
   foldr :: (a -> b -> b) -> b -> DeBruijnF a -> b
   foldr accum seed = \case
-    Var _ _ -> seed
-    Abs body _ -> accum body seed
+    Var _ -> seed
+    Abs body -> accum body seed
     App e1 e2 -> accum e1 (accum e2 seed)
 
 instance Traversable DeBruijnF where
   traverse f = \case
-    Var i lv -> pure (Var i lv)
-    Abs body lv -> (`Abs` lv) <$> f body
+    Var i -> pure (Var i)
+    Abs body -> Abs <$> f body
     App e1 e2 -> App <$> f e1 <*> f e2
 
 -------------------------------------------------------------------------------------
@@ -128,23 +134,25 @@ data Command = Define Text Expression
 
 -------------------------------------------------------------------------------------
 -------------------------------------------------------------------------------------
-type Environment = Map.Map String DeBruijn
+type Term = AnnTerm LambdaVar
+
+type Environment = Map.Map Text Term
 
 type ProgramT m = StateT Environment m
 
 data Error
-  = SyntaxError (ParseErrorBundle Text ())
-  | UndeclaredVariable String
-  | FatalError String
+  = SyntaxError (ParseErrorBundle Text Void)
+  | UndeclaredVariable Text
+  | FatalError Text
 
 instance Show Error where
-  show (SyntaxError se) = show se
+  show (SyntaxError se) = errorBundlePretty se
   show (UndeclaredVariable uv) =
     " ERROR: undeclared variable " ++
     show uv ++
     "\n- type \":review all\" to see all environment variables you can use\n- type \"" ++
-    uv ++ " = <lambda expression>\" to add this variables to environment"
-  show (FatalError fe) = fe
+    show uv ++ " = <lambda expression>\" to add this variables to environment"
+  show (FatalError fe) = show fe
 
 type FailableT = ExceptT Error
 -------------------------------------------------------------------------------------

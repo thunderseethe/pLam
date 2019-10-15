@@ -1,0 +1,34 @@
+
+Line := Define | Import | Export | Review | Run | Print | Evaluate
+
+Define := Id "=" Expr
+DefineOrVar := Id ["=" Expr]
+Evaluate := Expr
+
+Expr := App | Singleton
+Singleton := List | Decimal | Binary | Variable | Abstraction | "(" App ")"
+
+App := Singleton+
+
+Abstraction := "\" Identifier+ "." Expr
+
+Variable := Identifier
+
+Binary := 0b...
+Decimal := 123...
+
+List := "[" ExprList "]"
+ExprList := Expr "," ExprList | Expr
+
+
+Print := ":print" ".*$"
+Run := ":run" Filename
+Review := ":review" Identifier
+Export := ":export" Filename
+Import := ":import" Filename
+
+Term := Term " " Term | Abs | Var
+Var := a-z
+
+Term := Abs Term' | Var Term'
+Term' := Term Term' | empty

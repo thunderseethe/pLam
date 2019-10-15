@@ -1,62 +1,100 @@
 :q
-add 11 12
-add 1 9
-add = (\m n. (\f x. m f (n f x)))
+(\x.(\y.x))
 :q
-S I K S
-S I K
-S K I
-0
-K I
-S K K
-I
-id
-S K
-SK
-S
-S = \x y z. x z (y z)
-K = \x y. x
-I = \x.x
-id K
-id
-id = \x. x
-id
-\x.x
+(\x . (\y.x))
+(\x.(\y.x))
+(\x.x)
 :q
-mult
-add 4 5
-add 3 2
-add = (\m n. (\f x. m f (n f x)))
-5
-add 3 2
-add 4 5
-add = (\m n. (\f z. m f (n f z)))
+(\x.(\y.x))
 :q
-K 1
-K
-K = (\x y. x)
-add
-add = (\m n. (\f z. m f (n f z)))
+(\x.(\y.x))
 :q
-b
-m
-a
-k
-k
-k 1
-k
-k = (\x y. x)
-add 1
-mult
-add 1 2
-add
-add = (\m n. (\f z. m f (n f z)))
+(\x.(\y.x))
+\x.\y.x
+(\y.x)
+(\x.(\y.x))
+(\x.\y.x)
 :q
-:
-1 + 2
-1
-2
-add 1 2
-1 + 2
-1
-0
+k = (\x.\y.x)
+(\x.(\y.x))
+(\x.\y.x)
+:q
+(\x. (\y. x))
+:q
+(\x.x)
+:q
+(\x.(\y.x))
+(\x.x)
+(\x.y)
+:q
+\x y. x
+\x.\y.x
+(\x.(\y.x))
+:q
+(\x. x x x)
+(\x. x x)
+(\x.(\y. x))
+:q
+(\x.(\y.x))
+:q
+:q
+(\x.(\y.x))
+:q
+(\x.(\y.x))
+:q
+(\x.(\y.x))
+:q
+(\x.(\y.x))
+:q
+(\x.(\y.x))
+:q
+(\x.(\y.x))
+:q
+(\x. (\y. x))
+:q
+x = x
+x
+(\x. x)
+:q
+xld
+x
+:q
+(\x. (\y.x ))
+x
+:q
+:q
+x
+(\x. x)
+:q
+xct
+xc
+x
+:q
+q
+x
+\x. (\y. x)
+\x.\y.x
+\x. x
+(\x. (\y. y))
+:q
+x
+x
+(
+:q
+(\x y. x) (x y z. x z (y z))
+(\m n f z. m f (n f z))
+(\x y. x)
+(\x y z. x z (y z))
+:q
+(\x. x)
+:q
+(\x y z. x z (y z))
+:q
+(\x y z. x z (y z))
+(\x y. x)
+:q
+(\x y. (\z. z) x)
+(\x y z. x z (y z))
+(\x y. x)
+:q
+(\x y z. x z (y z))

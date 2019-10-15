@@ -18,8 +18,8 @@ cata2 = cata . lowerDay
 
 -- An unfold that allows for early return by returning Left
 earlyReturnM
-    :: (Monad m, Traversable t)
-    => (a -> m (Either (Fix t) (t a)))
-    -> (a -> m (Fix t))
+    :: (Monad m, Traversable (Base t), Corecursive t)
+    => (a -> m (Either t (Base t a)))
+    -> (a -> m t)
 earlyReturnM f = go
-    where go = (either return (fmap Fix . traverse go) =<<) . f
+    where go = (either return (fmap embed . traverse go) =<<) . f

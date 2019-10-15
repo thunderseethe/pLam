@@ -3,12 +3,11 @@
 
 module Reducer where
 
-import           Control.Comonad.Cofree
+import           Control.Comonad.Trans.Cofree
+--import qualified Control.Comonad.Cofree as Cofree
 import           Control.Monad.State
 
-import           Data.Functor.Classes
 import           Data.Functor.Foldable   hiding ( fold )
-import qualified Data.List                     as List
 import           Data.Set                hiding ( fold )
 import           Prelude                 hiding ( filter
                                                 , map
@@ -23,35 +22,36 @@ import           Schemes
 --------------------------------------------------------------------------------
 -- extracting all variales from a input expression
 ---- returns Set of lambda variables
-vars :: DeBruijn -> Set Int
+vars :: Term -> Set Int
 vars = cata alga
  where
+  alga :: (Base Term (Set Int)) -> Set Int
   alga = \case
-    Var i    _  -> singleton i
-    Abs body _  -> body
-    App e1   e2 -> union e1 e2
+    _ :< Var i  -> singleton i
+    _ :< Abs body  -> body
+    _ :< App e1 e2 -> union e1 e2
 
 --------------------------------------------------------------------------------
 -- extracting free variales from a input expression
 ---- returns Set of lambda variables
-freeVars :: DeBruijn -> Set Int
+freeVars :: Term -> Set Int
 freeVars = cata alga
  where
   alga = \case
-    Var i    _  -> if i < 0 then singleton i else empty
-    Abs body _  -> body
-    App e1   e2 -> union e1 e2
+    _ :< Var i     -> if i < 0 then singleton i else empty
+    _ :< Abs body  -> body
+    _ :< App e1   e2 -> union e1 e2
 
 --------------------------------------------------------------------------------
 -- extracting bound variales from a input expression
 ---- returns Set of lambda variables
-boundVars :: DeBruijn -> Set Int
+boundVars :: Term -> Set Int
 boundVars = cata alga
  where
   alga = \case
-    Var i    _  -> if i > 0 then singleton i else empty
-    Abs body _  -> body
-    App e1   e2 -> union e1 e2
+    _ :< Var i     -> if i > 0 then singleton i else empty
+    _ :< Abs body  -> body
+    _ :< App e1   e2 -> union e1 e2
 
 --------------------------------------------------------------------------------
 -- returns a functions, which substitutes all free* occurences of x by n
@@ -62,26 +62,26 @@ boundVars = cata alga
 ------ if x is NOT in free vars in the body, there is no x to be substituted
 ------ if x is in free vars in the body AND abstraction var is not in free vars of n, substitute in the body
 ------ else, we need a fresh var because abstraction variable y is in free vars of term to be substituted. fresh var is y'
-subst :: DeBruijn -> DeBruijn -> DeBruijn
+subst :: Term -> Term -> Term
 subst sub expr = cata alga expr (0, sub)
  where
   alga
-    :: Base DeBruijn ((Int, DeBruijn) -> DeBruijn)
-    -> ((Int, DeBruijn) -> DeBruijn)
+    :: Base Term ((Int, Term) -> Term)
+    -> ((Int, Term) -> Term)
   alga = \case
-    Var i    lv -> \(n, subTerm) -> if i == n then subTerm else var i lv
-    Abs body lv -> \(n, subTerm) -> abs (body (n + 1, shift 1 0 subTerm)) lv
-    App e1   e2 -> \s -> app (e1 s) (e2 s)
+    lv :< Var i -> \(n, subTerm) -> if i == n then subTerm else var i lv
+    lv :< Abs body -> \(n, subTerm) -> abs (body (n + 1, shift 1 0 subTerm)) lv
+    _ :< App e1 e2 -> \s -> app (e1 s) (e2 s)
 
 
-shift :: Int -> Int -> DeBruijn -> DeBruijn
+shift :: Int -> Int -> Term -> Term
 shift d c = ana coalga . (,,) d c
  where
-  coalga :: (Int, Int, DeBruijn) -> Base DeBruijn (Int, Int, DeBruijn)
-  coalga (delta, cutoff, e) = case unfix e of
-    Var i    lv -> let n = if i >= cutoff then i + delta else i in Var n lv
-    Abs body lv -> Abs (delta, cutoff + 1, body) lv
-    App e1   e2 -> App (delta, cutoff, e1) (delta, cutoff, e2)
+  coalga :: (Int, Int, Term) -> Base Term (Int, Int, Term)
+  coalga (delta, cutoff, e) = case project e of
+    lv :< Var i -> let n = if i >= cutoff then i + delta else i in lv :< Var n
+    lv :< Abs body -> lv :< Abs (delta, cutoff + 1, body)
+    lv :< App e1   e2 -> lv :< App (delta, cutoff, e1) (delta, cutoff, e2)
 
 --------------------------------------------------------------------------------
 -- ALPHA equivalence
@@ -90,37 +90,31 @@ shift d c = ana coalga . (,,) d c
 ---- variables derive Eq
 ---- applications are alpha equivalent if their corresponding parts are
 ---- we substitute bounding var of one abstraction into body of another and compare bodies
-alphaEquiv :: DeBruijn -> DeBruijn -> Bool
+alphaEquiv :: Term -> Term -> Bool
 alphaEquiv = cata2 convolution
   where
-    convolution :: DayB DeBruijn DeBruijn Bool -> Bool
-    convolution (DayB f g fn) =
-      liftEq fn f g
+    convolution :: DayB Term Term Bool -> Bool
+    convolution (DayB f g fn) = case (f, g) of
+      (_ :< Var i1, _ :< Var i2) -> i1 == i2
+      (_ :< Abs body1, _ :< Abs body2) -> fn body1 body2
+      (_ :< App a1 b1, _ :< App a2 b2) -> fn a1 a2 && fn b1 b2
+      (_, _) -> False
+      
 
 --------------------------------------------------------------------------------
 -- BETA reduction
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
--- finds all beta redexes of given lambda term
------ variable has no redexes
------ application of abstraction to expression is itself a redex. concatenate it with any inner redexes
------ redexes of (other type) application are just concatenated redexes of applicants
------ redexes of abstraction are redexes of its body
-betaRedexes :: DeBruijn -> [DeBruijn]
-betaRedexes = para alga
- where
-  alga = \case
-    App (Fix (Abs e1 lv), l1) (e2, l2) ->
-      app (Syntax.abs e1 lv) e2 : l1 ++ l2
-    App (_, l1 ) (_, l2) -> l1 ++ l2
-    Abs (_, lst) _       -> lst
-    Var _        _       -> []
-
-
---------------------------------------------------------------------------------
 -- determines whether given lambda expression contains at least one beta redex
-hasBetaRedex :: DeBruijn -> Bool
-hasBetaRedex = not . List.null . betaRedexes
+hasBetaRedex :: Term -> Bool
+hasBetaRedex = para alga
+  where
+    alga :: Base Term (Term, Bool) -> Bool
+    alga = \case
+      _ :< App (expr, left) (_, right) -> case project expr of
+        _ :< Abs _ -> True
+        _ -> left || right
+      _ :< _ -> False
 
 --------------------------------------------------------------------------------
 -- performs one step beta reduction and count steps
@@ -128,26 +122,24 @@ hasBetaRedex = not . List.null . betaRedexes
 ---- (other type) application reduces its applicants (first left one to beta nf)
 ---- reducing abstraction is reducing its body
 ---- variable doesnt reduce
-betaReduction :: EvaluateOption -> DeBruijn -> State Int DeBruijn
-betaReduction _ term = state $ \k -> histo (alga k) term
- where
-  alga
-    :: Int -> Base DeBruijn (Cofree (Base DeBruijn) (DeBruijn, Int)) -> (DeBruijn, Int)
-  alga k = \case
-    Var i                lv -> (var i lv, k)
-    Abs ((body, n) :< _) lv -> (abs body lv, n)
-    App (_ :< Abs ((body, n) :< _) _) ((arg, m) :< _) ->
-      (shift (-1) 0 $ subst (shift 1 0 arg) body, n + m + 1)
-    App ((e1, n) :< _) ((e2, m) :< _) -> (app e1 e2, n + m)
-
+betaReduction :: Term -> State Int Term
+betaReduction term = state $ \k -> cata (alga k) term
+  where
+    alga :: Int -> Base Term (Term, Int) -> (Term, Int)
+    alga k = \case
+      lv :< Var i -> (var i lv, k)
+      lv :< Abs (body, n) -> (abs body lv, n)
+      _ :< App (expr, n) (arg, m) -> case project expr of
+        _ :< Abs body -> (shift (-1) 0 $ subst (shift 1 0 arg) body, n + m + 1)
+        _ -> (app expr arg, n + m)
 
 --------------------------------------------------------------------------------
 -- computes the beta normal form of a lambda term and count steps
 ---- do one step beta reduction if there are any redexes left
-betaNF :: EvaluateOption -> DeBruijn -> State Int DeBruijn
-betaNF cbt = go
+betaNF :: Term -> State Int Term
+betaNF = go
  where
-  go :: DeBruijn -> State Int DeBruijn
+  go :: Term -> State Int Term
   go ex = if hasBetaRedex ex
-    then betaReduction cbt ex >>= go
+    then betaReduction ex >>= go
     else return ex

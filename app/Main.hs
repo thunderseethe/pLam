@@ -17,6 +17,7 @@ import           Data.Maybe
 import qualified Data.Text                     as Text
 import           Data.Text                      ( Text )
 import qualified Data.Text.IO                  as TIO
+import           Formatting
 --import           System.IO                      ( hClose
 --                                                , openFile
 --                                                , IOMode(WriteMode)
@@ -27,7 +28,8 @@ import           System.Console.Haskeline       ( Settings
                                                 )
 import           System.Environment
 import           System.Directory               ( doesFileExist )
-import           Text.Parsec
+--import           Text.Parsec
+import           Text.Megaparsec
 
 
 version :: Text
@@ -63,7 +65,7 @@ execAll printLn = go
                 exprs <- importFile f
                 go exprs
             Define v e            -> void $ evalDefine v e
-            Evaluate det cbv rawE -> void $ decideEvaluate det cbv rawE
+            Evaluate _ _ rawE -> void $ decideEvaluate rawE
             Print s               -> printLn s
             _                     -> return ()
         go ls
@@ -76,15 +78,15 @@ execute line = do
     handle :: Command -> Eval ()
     handle = \case
         Define v e         -> void $ evalDefine v e
-        Evaluate det cbv e -> void $ decideEvaluate det cbv e
+        Evaluate _ _ e -> void $ decideEvaluate e
         Import f           -> do
             exprs <- importFile f
-            execAll outputStrLn exprs
+            execAll (outputStrLn . Text.unpack) exprs
         Export f -> exportFile f
         Review r -> reviewSymbol r
         Run    f -> void $ importFile f
         Print  s -> do
-            outputStrLn s
+            outputStrLn $ Text.unpack s
             outputStrLn
                 "(NOTE: it makes more sense to use a comment line (starts with double '-' than :print command when you are in interactive mode)"
         Comment _ -> return ()
@@ -92,21 +94,23 @@ execute line = do
 -------------------------------------------------------------------------------------
                    -- Command Handlers --
 -------------------------------------------------------------------------------------
+
+filePath :: Text -> FilePath
+filePath = formatToString (string % stext % ".plam") importPath
+
 importFile :: Text -> Eval [Text]
 importFile f =
-    Text.lines <$> liftIO (TIO.readFile (importPath ++ f ++ ".plam"))
+    Text.lines <$> liftIO (TIO.readFile (filePath f))
 
 exportFile :: Text -> Eval ()
 exportFile f = do
-    fileExists <- liftIO $ doesFileExist (importPath ++ f ++ ".plam")
-    outFile    <- if not fileExists
-        then liftIO $ TIO.openFile (importPath ++ f ++ ".plam") WriteMode
-        else throwError
-            (FatalError $ "--- export failed : " ++ f ++ " already exists")
+    fileExists <- liftIO $ doesFileExist (filePath f)
     env <- get
-    mapM_ (saveGlobal outFile) (Prelude.reverse . Map.toList $ env)
-    liftIO $ hClose outFile
-    outputStrLn ("--- successfully exported to import/" ++ f ++ ".plam")
+    if not fileExists
+        then liftIO $ TIO.writeFile (filePath f) (convertEnvironmentToFile env)
+        else throwError
+            (FatalError $ Text.concat ["--- export failed : " , f, " already exists"])
+    outputStrLn ("--- successfully exported to " ++ filePath f)
 
 reviewSymbol :: Text -> Eval ()
 reviewSymbol r = do
@@ -114,15 +118,15 @@ reviewSymbol r = do
     case r of
         "all" ->
             outputStrLn " ENVIRONMENT:" >> mapM_ showGlobal (Map.toList env)
-        _ -> outputStrLn
-            ("--- definition of " ++ show r ++ ": " ++ fromMaybe
+        _ -> outputStrLn . Text.unpack $ sformat
+            ("--- definition of " % stext % ": " % stext
+            ) r (fromMaybe
                 "none"
-                (reviewVariable env r)
-            )
+                (reviewVariable env r))
 
 -------------------------------------------------------------------------------------
 isplam :: Text -> Bool
-isplam filename = ".plam" `Text.isSuffixOf` filename
+isplam = Text.isSuffixOf ".plam"
 
 -------------------------------------------------------------------------------------
                    -- MAIN with Read-Evaluate-Print Loop --
@@ -146,11 +150,11 @@ decideRun [arg]
         content <- TIO.readFile arg
         let exprs = Text.lines content
         output <- runEvaluator $ execAll (liftIO . TIO.putStrLn) exprs
-        putStrLn "\x1b[1;32mDone.\x1b[0m"
+        TIO.putStrLn "\x1b[1;32mDone.\x1b[0m"
         return $ first (second $ const ()) output
 decideRun args = do
     unless (Prelude.null args)
-           (putStrLn "\x1b[31mignoring argument(s)...\x1b[0m")
+           (TIO.putStrLn "\x1b[31mignoring argument(s)...\x1b[0m")
     TIO.putStrLn heading
     runEvaluator repl
 
@@ -169,13 +173,13 @@ main = do
 -- REPL specific functions --
 type PureEval a = StateT Environment (ExceptT Error Identity) a
 
-_par :: String -> DeBruijn
+_par :: Text -> Term
 _par input =
     let debruijn =
-                (evalExp $ either undefined id $ parse megaParseExpression
+                (evalExp $ either undefined id $ parse parseExpr
                                                        "parser"
                                                        input
-                ) :: PureEval DeBruijn
+                ) :: PureEval Term
     in  either undefined id $ runIdentity . runExceptT $ evalStateT
             debruijn
             Map.empty
