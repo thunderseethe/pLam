@@ -49,12 +49,14 @@ identifier = lexeme $ do
     return (T.pack (c : cs)) <?> "Identifier"
 
 reserved :: Text -> MegaParsec ()
-reserved name = lexeme $ do
+reserved name = do
     _ <- symbol' name
     notFollowedBy identLetter
 
 reservedOp :: Text -> MegaParsec ()
-reservedOp name = lexeme (symbol' name *> notFollowedBy opLetter)
+reservedOp name = do
+    _ <- symbol' name
+    return ()
 
 parens :: MegaParsec a -> MegaParsec a
 parens = between (symbol' "(") (symbol' ")")
@@ -69,7 +71,7 @@ comma = symbol' ","
 
 opLetter :: MegaParsec Char
 opLetter =
-    Text.Megaparsec.oneOf (".`#~@$%^&*_+-=|;',/?[]<>(){} " :: [Char])
+    Text.Megaparsec.oneOf (".`#~@$%^&*_+-=|;',/?[]<>){} " :: [Char])
 
 filename :: MegaParsec Text
 filename = T.pack <$> some (C.letterChar <|> opLetter <|> C.digitChar)
@@ -171,51 +173,46 @@ parseVariable = fmap (varOrEnv . LambdaVar) identifier <?> "Variable"
 parseAbstraction :: MegaParsec Expression
 parseAbstraction = do
     reservedOp "\\"
-    args <- dbg "args" (some identifier)
-    dbg "dot" $ reservedOp "."
-    body <- dbg "body" parseExpr <?> "Abstraction"
+    args <- some identifier
+    reservedOp "."
+    body <- parseExpr <?> "Abstraction"
     return $ curryLambda args body
-    where 
+    where
         curryLambda :: [Text] -> Expression -> Expression
         curryLambda xs body = foldr (\arg acc -> abstraction (LambdaVar arg) acc) body xs
 
-parseApplication :: MegaParsec Expression
-parseApplication = do
-    es <- some (dbg "appSingle" parseSingleton) <?> "Application"
-    return $ foldl1 application es
-
 parseSingleton :: MegaParsec Expression
 parseSingleton =
-    --parseList
-    --    <|> parseDecimal
+    parseList
+        <|> parseDecimal
     --    <|> parseBinary
-        {-<|>-} dbg "var" parseVariable
-        <|> dbg "abs" parseAbstraction
-        <|> dbg "parens" (parens parseExpr)
+        <|> parseVariable
+        <|> parseAbstraction
+        <|> parens parseExpr
         <?> "Singleton"
 
 parseExpr :: MegaParsec Expression
 parseExpr = do
-    left <- dbg "leftTerm" parseSingleton
-    optBuildTerm <- dbg "rightTerm" $ optional parseExpr'
+    left <- parseSingleton
+    optBuildTerm <- optional parseExpr'
     return $ case optBuildTerm of
         Just buildTerm -> buildTerm left
         Nothing -> left
 
 parseExpr' :: MegaParsec (Expression -> Expression)
 parseExpr' = do
-    term <- dbg "rightTerm" parseExpr
+    term <- parseExpr
     optBuildTerm <- optional parseExpr'
     return $ case optBuildTerm of
         Just buildTerm -> \expr -> buildTerm (application expr term)
-        Nothing -> (`application` term)
+        Nothing -> \expr -> application expr term
 
 -------------------------------------------------------------------------------------
 
 -------------------------------------------------------------------------------------
 parseEvaluate :: MegaParsec Command
 parseEvaluate =
-    dbg "evaluate" (Evaluate None None <$> parseExpr <?> "Evaluate")
+    Evaluate None None <$> parseExpr <?> "Evaluate"
 -----------------------------------
 
 parseImport :: MegaParsec Command
@@ -241,13 +238,11 @@ parsePrint = do
     reserved ":print"
     Print . T.pack <$> manyTill L.charLiteral C.newline <?> "Print"
 
-parseDefineOrEval :: MegaParsec Command
-parseDefineOrEval = do
+parseDefine :: MegaParsec Command
+parseDefine = do
     ident <- identifier
-    optExpr <- optional (reservedOp "=" *> parseExpr)
-    return $ case optExpr of
-        Just expr -> Define ident expr
-        Nothing -> Evaluate None None $ (varOrEnv . LambdaVar) ident
+    reservedOp "="
+    Define ident <$> parseExpr
 
 parseLine :: MegaParsec Command
 parseLine =
@@ -256,7 +251,7 @@ parseLine =
         <|> parseReview
         <|> parseRun
         <|> parsePrint
-        <|> parseDefineOrEval
+        <|> try parseDefine
         <|> parseEvaluate
         <?> "Line"
 
@@ -266,5 +261,5 @@ parseLine =
 readLine :: (MonadError Error m) => Text -> m Command
 readLine input =
     let parseOutput = first SyntaxError
-            $ parse (dbg "parseLine" parseLine) "parser" input
+            $ parse parseLine "parser" input
     in  either throwError return parseOutput

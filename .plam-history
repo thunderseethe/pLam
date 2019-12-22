@@ -1,4 +1,57 @@
 :q
+s i
+i
+i = \x . x
+s
+s = \x y z. x z (y z)
+:q
+(\x y z. x z (y z)) (\x. x)
+s (\x.x)
+s
+i s
+s i
+i = \x.x
+s
+s = \x y z. x z (y z)
+:q
+[s, i]
+s (\x. x)
+s i
+i
+s i
+(\i.i) (\x.x)
+\i.i (\x.x)
+\i.i
+i = \x.x
+s
+s = \x y z. x z (y z)
+s
+s = \x. x x
+s = \x. x
+s = \x.x
+s = \xyz. x z (y z)
+:q
+\x.(\y.(\z. x z (y z)))
+\x.(\y.x)
+:q
+\x.(\y.x)
+\x.\y.x
+:q
+\x.\y.x
+\x. x
+(\x. (\y. x))
+(
+\x. x
+\x.x
+ls
+:q
+\x. (\y.x)
+\x.(\y.x)
+(\x.(\y.x))
+(\x.\y.x)
+(\x.(\y.x))
+ls
+:q
 (\x.(\y.x))
 :q
 (\x . (\y.x))
@@ -45,56 +98,3 @@ k = (\x.\y.x)
 (\x.(\y.x))
 :q
 (\x.(\y.x))
-:q
-(\x.(\y.x))
-:q
-(\x.(\y.x))
-:q
-(\x. (\y. x))
-:q
-x = x
-x
-(\x. x)
-:q
-xld
-x
-:q
-(\x. (\y.x ))
-x
-:q
-:q
-x
-(\x. x)
-:q
-xct
-xc
-x
-:q
-q
-x
-\x. (\y. x)
-\x.\y.x
-\x. x
-(\x. (\y. y))
-:q
-x
-x
-(
-:q
-(\x y. x) (x y z. x z (y z))
-(\m n f z. m f (n f z))
-(\x y. x)
-(\x y z. x z (y z))
-:q
-(\x. x)
-:q
-(\x y z. x z (y z))
-:q
-(\x y z. x z (y z))
-(\x y. x)
-:q
-(\x y. (\z. z) x)
-(\x y z. x z (y z))
-(\x y. x)
-:q
-(\x y z. x z (y z))
