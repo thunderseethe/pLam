@@ -1,4 +1,29 @@
 :q
+s k i
+k i
+s k
+(\i. i)
+s k i
+let i = (\x. x)
+let k = (\x y. x)
+s
+let s = (\x y z. x z (y z))
+:run_test
+s
+let s = (\s.s)
+:q
+let ident = (\s . s)
+let
+let s = (\x y z. x z (y z))
+:q
+let s_comb = (\x. x)
+let s = (\x.x)
+let
+let S = (\x y z. x z (y z))
+:q
+[1, 2]
+\x.\y.x
+:q
 s i
 i
 i = \x . x
@@ -73,28 +98,3 @@ k = (\x.\y.x)
 (\x.\y.x)
 :q
 (\x. (\y. x))
-:q
-(\x.x)
-:q
-(\x.(\y.x))
-(\x.x)
-(\x.y)
-:q
-\x y. x
-\x.\y.x
-(\x.(\y.x))
-:q
-(\x. x x x)
-(\x. x x)
-(\x.(\y. x))
-:q
-(\x.(\y.x))
-:q
-:q
-(\x.(\y.x))
-:q
-(\x.(\y.x))
-:q
-(\x.(\y.x))
-:q
-(\x.(\y.x))

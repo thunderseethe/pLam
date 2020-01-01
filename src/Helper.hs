@@ -48,7 +48,7 @@ convertEnvironmentToFile = Map.foldrWithKey' appendEntry Text.empty
 convertToName :: Environment -> Term -> Maybe Text
 convertToName env term = Map.foldrWithKey
     findAlphaEquiv
-    (Text.pack . show <$> findNumeral term)
+    (findNumeral term)
     env
   where
     findAlphaEquiv key val acc = if alphaEquiv val term then Just key else acc

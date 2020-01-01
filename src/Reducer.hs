@@ -23,10 +23,7 @@ import           Schemes
 -- extracting all variales from a input expression
 ---- returns Set of lambda variables
 vars :: Term -> Set Int
-vars = cata alga
- where
-  alga :: (Base Term (Set Int)) -> Set Int
-  alga = \case
+vars = cata $ \case
     _ :< Var i  -> singleton i
     _ :< Abs body  -> body
     _ :< App e1 e2 -> union e1 e2
@@ -35,9 +32,7 @@ vars = cata alga
 -- extracting free variales from a input expression
 ---- returns Set of lambda variables
 freeVars :: Term -> Set Int
-freeVars = cata alga
- where
-  alga = \case
+freeVars = cata $ \case
     _ :< Var i     -> if i < 0 then singleton i else empty
     _ :< Abs body  -> body
     _ :< App e1   e2 -> union e1 e2
@@ -46,9 +41,7 @@ freeVars = cata alga
 -- extracting bound variales from a input expression
 ---- returns Set of lambda variables
 boundVars :: Term -> Set Int
-boundVars = cata alga
- where
-  alga = \case
+boundVars = cata $ \case
     _ :< Var i     -> if i > 0 then singleton i else empty
     _ :< Abs body  -> body
     _ :< App e1   e2 -> union e1 e2

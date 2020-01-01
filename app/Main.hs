@@ -18,17 +18,12 @@ import qualified Data.Text                     as Text
 import           Data.Text                      ( Text )
 import qualified Data.Text.IO                  as TIO
 import           Formatting
---import           System.IO                      ( hClose
---                                                , openFile
---                                                , IOMode(WriteMode)
---                                                )
 import           System.Console.Haskeline       ( Settings
                                                 , historyFile
                                                 , defaultSettings
                                                 )
 import           System.Environment
 import           System.Directory               ( doesFileExist )
---import           Text.Parsec
 import           Text.Megaparsec
 
 

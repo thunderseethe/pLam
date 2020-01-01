@@ -13,7 +13,6 @@ import           Data.Text                      ( Text )
 import           Data.Void
 
 import           Text.Megaparsec         hiding ( empty )
-import           Text.Megaparsec.Debug
 import qualified Text.Megaparsec.Char          as C
 import qualified Text.Megaparsec.Char.Lexer    as L
 
@@ -25,7 +24,7 @@ reservedOps :: [Text]
 reservedOps = ["=", ".", "\\", "[", "]"]
 
 reservedNames :: [Text]
-reservedNames = [":import", ":review", ":run", ":print", ":d", ":cbv"]
+reservedNames = [":import", ":review", ":run", ":print", ":d", ":cbv", "let"]
 
 type MegaParsec = Text.Megaparsec.Parsec Void Text
 
@@ -37,21 +36,25 @@ lexeme :: MegaParsec a -> MegaParsec a
 lexeme = L.lexeme spaceConsumer
 
 symbol' :: Text -> MegaParsec Text
-symbol' = L.symbol spaceConsumer
+symbol' = L.symbol' spaceConsumer
 
 identLetter :: MegaParsec Char
 identLetter = C.alphaNumChar <|> C.char '_' <?> "IdentLetter"
 
 identifier :: MegaParsec Text
-identifier = lexeme $ do
-    c  <- C.letterChar
-    cs <- many identLetter
-    return (T.pack (c : cs)) <?> "Identifier"
+identifier = (lexeme . try) (p >>= check)
+  where
+    p = 
+        T.pack <$> ((:) <$> C.letterChar <*> many identLetter) <?> "Identifier"
+    check x =
+       if x `elem` reservedNames
+       then fail $ "keyword " ++ show x ++ "cannot be an identifier"
+       else return x
 
 reserved :: Text -> MegaParsec ()
 reserved name = do
     _ <- symbol' name
-    notFollowedBy identLetter
+    return ()
 
 reservedOp :: Text -> MegaParsec ()
 reservedOp name = do
@@ -185,7 +188,6 @@ parseSingleton :: MegaParsec Expression
 parseSingleton =
     parseList
         <|> parseDecimal
-    --    <|> parseBinary
         <|> parseVariable
         <|> parseAbstraction
         <|> parens parseExpr
@@ -205,7 +207,7 @@ parseExpr' = do
     optBuildTerm <- optional parseExpr'
     return $ case optBuildTerm of
         Just buildTerm -> \expr -> buildTerm (application expr term)
-        Nothing -> \expr -> application expr term
+        Nothing -> (`application` term)
 
 -------------------------------------------------------------------------------------
 
@@ -213,7 +215,6 @@ parseExpr' = do
 parseEvaluate :: MegaParsec Command
 parseEvaluate =
     Evaluate None None <$> parseExpr <?> "Evaluate"
------------------------------------
 
 parseImport :: MegaParsec Command
 parseImport =
@@ -240,6 +241,7 @@ parsePrint = do
 
 parseDefine :: MegaParsec Command
 parseDefine = do
+    reserved "let"
     ident <- identifier
     reservedOp "="
     Define ident <$> parseExpr
@@ -251,7 +253,7 @@ parseLine =
         <|> parseReview
         <|> parseRun
         <|> parsePrint
-        <|> try parseDefine
+        <|> parseDefine
         <|> parseEvaluate
         <?> "Line"
 
